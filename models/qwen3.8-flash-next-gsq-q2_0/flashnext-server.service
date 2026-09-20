@@ -12,6 +12,11 @@ Environment=LD_LIBRARY_PATH=%h/src/llama.cpp-lru-new/build/bin
 # must stay at its default: op-offload + cache measured at half speed. 64 slots/layer = ~4 GiB VRAM,
 # which forces context down from 262144 to 131072. Measured: decode 34 -> 49-51 t/s (fresh prose),
 # 34 -> 44.5 (extractive); output identical to the uncached path. Previous unit: *.bak.*-pre-lru
+# admission gate (measured 2026-09-21, 64 slots): admit 3 / window 32 beat ungated by 12-14% steady,
+# 9-11% under topic shifts, 12-15% extractive. DEBUG=1 prints hit/upload/yield telemetry to the journal.
+Environment=LLAMA_MOE_CACHE_ADMIT=3
+Environment=LLAMA_MOE_CACHE_WINDOW=32
+Environment=LLAMA_MOE_CACHE_DEBUG=1
 ExecStart=%h/src/llama.cpp-lru-new/build/bin/llama-server \
   -m %h/ai-models/flashnext-gsq-q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf \
   --no-warmup -lm dio \

@@ -1,0 +1,150 @@
+From 29f69d054e7bbb99d86ac3398bc4f88f43f20370 Mon Sep 17 00:00:00 2001
+From: bigfinn <bigfinn@users.noreply.github.com>
+Date: Mon, 21 Sep 2026 00:44:13 +0300
+Subject: [PATCH 4/5] moe-cache: windowed admission gate and upload telemetry
+
+Per-(layer, expert) uint8 use counter, halved every LLAMA_MOE_CACHE_WINDOW
+steps (default 16); an uncached expert is uploaded only after
+LLAMA_MOE_CACHE_ADMIT sightings (default 1 = unconditional, the PR's
+behaviour). Counts uploads, evictions, bytes uploaded and bytes served and
+logs yield (served/uploaded) every 256 steps under LLAMA_MOE_CACHE_DEBUG=1.
+
+Policy and rationale from the PR #27861 thread: unconditional admission
+saturates the upload worker (uploads ~= evictions) and the hit rate
+collapses because of the churn; gating at 3 sightings per 16-step window
+cut uploads 5x and raised the hit rate there.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
+---
+ src/llama-moecache.cpp | 49 +++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 44 insertions(+), 5 deletions(-)
+
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index adcacba5e..ce81a5e9f 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -6,6 +6,7 @@
+ #include "ggml.h"
+ #include "ggml-backend.h"
+ 
++#include <algorithm>
+ #include <cinttypes>
+ #include <condition_variable>
+ #include <cstdlib>
+@@ -30,8 +31,19 @@ struct layer_state {
+ 
+     std::vector<bool>     slot_in_flight; // slot has an upload pending
+ 
++    // admission gate (pjsgsy, PR #27861 thread): windowed use counter per expert, halved
++    // every `window` steps; an uncached expert is only uploaded after `admit` sightings.
++    // Unconditional admission churns: uploads ~= evictions, hit rate collapses under the
++    // upload worker's saturation. Yield = bytes served / bytes uploaded is the metric.
++    std::vector<uint8_t>  use_cnt;
++    size_t                expert_bytes = 0; // up+gate+down slice bytes for one expert
++
+     uint64_t n_hit  = 0;
+     uint64_t n_miss = 0;
++    uint64_t n_upload = 0;
++    uint64_t n_evict  = 0;
++    uint64_t bytes_up = 0;
++    uint64_t bytes_served = 0;
+ };
+ 
+ struct upload_job {
+@@ -44,6 +56,9 @@ struct upload_job {
+ struct moe_cache {
+     int32_t n_slots     = 0;
+     int32_t max_inserts = 2;
++    int32_t admit       = 1;   // LLAMA_MOE_CACHE_ADMIT  (1 = unconditional, PR default)
++    int32_t window      = 16;  // LLAMA_MOE_CACHE_WINDOW (steps between halvings; 0 = never)
++    bool    telemetry   = false; // LLAMA_MOE_CACHE_DEBUG
+ 
+     uint64_t clock   = 0;
+     uint64_t n_steps = 0;
+@@ -111,9 +126,14 @@ void moe_obs_cb(const char * name, const struct ggml_tensor * ids, void * ud) {
+             const int32_t slot = ls->expert_slot[id];
+             if (slot >= 0) {
+                 ls->n_hit++;
++                ls->bytes_served += ls->expert_bytes;
+                 ls->slot_last_use[slot] = ++mc->clock;
+             } else {
+                 ls->n_miss++;
++                if (ls->use_cnt[id] < 255) ls->use_cnt[id]++;
++                if (ls->use_cnt[id] < (uint8_t) mc->admit) {
++                    continue; // not admitted yet: seen too rarely in the current window
++                }
+                 bool dup = false;
+                 for (int32_t p : ls->pending) {
+                     if (p == id) { dup = true; break; }
+@@ -159,6 +179,9 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+         mc->n_slots = n_slots;
+         if (max_inserts > 0) {
+             mc->max_inserts = max_inserts;
++            if (const char * e = getenv("LLAMA_MOE_CACHE_ADMIT"))  { mc->admit  = std::max(1, atoi(e)); }
++            if (const char * e = getenv("LLAMA_MOE_CACHE_WINDOW")) { mc->window = std::max(0, atoi(e)); }
++            if (const char * e = getenv("LLAMA_MOE_CACHE_DEBUG"))  { mc->telemetry = atoi(e) != 0; }
+         }
+ 
+         // collect the host-resident expert layers, grouped by the device buffer
+@@ -275,6 +298,8 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             ls.expert_slot.assign(n_expert, -1);
+             ls.slot_last_use.assign(n_slots, 0);
+             ls.slot_in_flight.assign(n_slots, false);
++            ls.use_cnt.assign(n_expert, 0);
++            ls.expert_bytes = ls.pub.up_src->nb[2] + ls.pub.gate_src->nb[2] + ls.pub.down_src->nb[2];
+ 
+             std::vector<int32_t> dummy(n_expert, n_slots);
+             ggml_backend_tensor_set(ls.pub.dev_table,  dummy.data(), 0, n_expert*sizeof(int32_t));
+@@ -357,6 +382,11 @@ void llama_moe_cache_step() {
+ 
+     std::lock_guard<std::mutex> lock(mc->mtx);
+     mc->n_steps++;
++    if (mc->window > 0 && mc->n_steps % mc->window == 0) {
++        for (auto & ls : mc->layers) {
++            for (auto & c : ls.use_cnt) c >>= 1;
++        }
++    }
+ 
+     // 2) schedule new uploads: evict at a sync point (clear the victim's table
+     //    entry now), then hand the slice copies to the worker
+@@ -389,11 +419,14 @@ void llama_moe_cache_step() {
+ 
+             const int32_t victim = ls.slot_expert[slot];
+             if (victim >= 0) {
++                ls.n_evict++;
+                 ls.expert_slot[victim] = -1;
+                 ls.slot_expert[slot]   = -1;
+                 set_table_entry(ls.pub, victim, mc->n_slots);
+             }
+             ls.slot_in_flight[slot] = true;
++            ls.n_upload++;
++            ls.bytes_up += ls.expert_bytes;
+ 
+             std::lock_guard<std::mutex> wlk(mc->wmtx);
+             mc->todo.push_back({li, id, slot});
+@@ -402,10 +435,16 @@ void llama_moe_cache_step() {
+     }
+     mc->wcv.notify_one();
+ 
+-    if (mc->n_steps % 512 == 0) {
+-        uint64_t h = 0, m = 0;
+-        for (auto & ls : mc->layers) { h += ls.n_hit; m += ls.n_miss; }
+-        LLAMA_LOG_DEBUG("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%%\n",
+-                mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0);
++    if (mc->n_steps % 256 == 0) {
++        uint64_t h = 0, m = 0, up = 0, ev = 0, bu = 0, bs = 0;
++        for (auto & ls : mc->layers) { h += ls.n_hit; m += ls.n_miss; up += ls.n_upload; ev += ls.n_evict; bu += ls.bytes_up; bs += ls.bytes_served; }
++        const double yield = bu ? (double) bs / (double) bu : 0.0;
++        if (mc->telemetry) {
++            LLAMA_LOG_INFO("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% uploads=%" PRIu64 " evicts=%" PRIu64 " up=%.1fGiB served=%.1fGiB yield=%.2fx admit=%d window=%d\n",
++                    mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, up, ev, bu/1073741824.0, bs/1073741824.0, yield, mc->admit, mc->window);
++        } else {
++            LLAMA_LOG_DEBUG("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% yield=%.2fx\n",
++                    mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, yield);
++        }
+     }
+ }
+-- 
+2.43.0
+

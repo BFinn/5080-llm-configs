@@ -1,0 +1,40 @@
+From d24a25a2ead6099799becafd1cbbfbd85c7eb1cf Mon Sep 17 00:00:00 2001
+From: bigfinn <bigfinn@users.noreply.github.com>
+Date: Mon, 21 Sep 2026 00:55:00 +0300
+Subject: [PATCH 5/5] moe-cache: emit telemetry on stderr when
+ LLAMA_MOE_CACHE_DEBUG=1
+
+llama-server does not surface library INFO logs at its default verbosity,
+so the periodic hit/upload/yield line never reached the server log.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
+---
+ src/llama-moecache.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index ce81a5e9f..632fcb81f 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -9,6 +9,7 @@
+ #include <algorithm>
+ #include <cinttypes>
+ #include <condition_variable>
++#include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+ #include <deque>
+@@ -440,6 +441,9 @@ void llama_moe_cache_step() {
+         for (auto & ls : mc->layers) { h += ls.n_hit; m += ls.n_miss; up += ls.n_upload; ev += ls.n_evict; bu += ls.bytes_up; bs += ls.bytes_served; }
+         const double yield = bu ? (double) bs / (double) bu : 0.0;
+         if (mc->telemetry) {
++            // stderr on purpose: llama-server does not surface library INFO logs at default verbosity
++            fprintf(stderr, "moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% uploads=%" PRIu64 " evicts=%" PRIu64 " up=%.1fGiB served=%.1fGiB yield=%.2fx admit=%d window=%d\n",
++                    mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, up, ev, bu/1073741824.0, bs/1073741824.0, yield, mc->admit, mc->window);
+             LLAMA_LOG_INFO("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% uploads=%" PRIu64 " evicts=%" PRIu64 " up=%.1fGiB served=%.1fGiB yield=%.2fx admit=%d window=%d\n",
+                     mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, up, ev, bu/1073741824.0, bs/1073741824.0, yield, mc->admit, mc->window);
+         } else {
+-- 
+2.43.0
+

@@ -316,7 +316,8 @@ asynchronous. Decode-only (`n_tokens == 1`), so prefill is untouched.
 the PR commit cherry-picked onto current master, the AVX2 Q2_0 kernel, and a one-line
 fix that synchronizes the backend before the cache publishes new slot tables. The PR head
 has that sync commented out; a still-running CUDA graph could read a torn table. Flags:
-`--moe-expert-cache 64 --moe-expert-cache-inserts 2`.
+`--moe-expert-cache 64 --moe-expert-cache-inserts 2`, plus `LLAMA_MOE_CACHE_ADMIT=3`
+`LLAMA_MOE_CACHE_WINDOW=32` for the admission gate below.
 
 **Two things you must get right.** Misses are computed by the CPU matmul, because only the
 CPU op understands the skip table. So `GGML_OP_OFFLOAD_MIN_BATCH` must stay at its default
@@ -361,9 +362,44 @@ at 34 tok/s, or 131K at 50.
 | 80 | 5.0 GiB | yes, ~1.5 GiB headroom, no gain over 64 |
 | 96 | 6.0 GiB | no |
 
-The admission-gate patch from the PR thread (`--moe-expert-cache-admit`, windowed use
-counter) is not applied yet; it reportedly cuts upload churn 5x on weak host RAM and is
-the next thing to try.
+### Admission gate: the second win
+
+The PR admits every miss to the cache unconditionally. A contributor to its thread found
+that this churns on weak host RAM, with uploads roughly equal to evictions and the hit
+rate collapsing *because* of the churn, and that a windowed use counter fixed it. No code
+was published, so the policy was reimplemented from the description
+([`patches/0004-*`](patches/)): a `uint8` counter per layer and expert, halved every
+`LLAMA_MOE_CACHE_WINDOW` steps, and an uncached expert is uploaded only after
+`LLAMA_MOE_CACHE_ADMIT` sightings. Eviction stays LRU, which the same contributor found
+to beat frequency-based victims.
+
+Same binary, 64 slots, 131K, ungated arms run first and last as the order control:
+
+| Policy | Steady prose | Six shifting topics (mean) | Extractive |
+|---|---|---|---|
+| Ungated (PR default), first | 47.6 / 49.5 tok/s | 42.9 | 43.0 |
+| admit 3, window 16 | 50.9 / 51.8 | 46.9 | 46.5 |
+| admit 2, window 16 | 51.1 / 51.2 | 44.6 | 47.9 |
+| **admit 3, window 32** | **53.4 / 54.1** | **47.7** | **48.0** |
+| Ungated, last | 47.5 / 46.3 | 43.9 | 41.9 |
+
+Admit 3 with a 32-step window is 12-14% faster steady, 9-11% under topic shifts and
+12-15% on extractive output, over an already-cached baseline. It is deployed.
+
+Telemetry from the live service (`LLAMA_MOE_CACHE_DEBUG=1`, printed to stderr because the
+server does not surface library INFO logs at default verbosity):
+
+```
+steps=768 hits=256906 misses=114994 hit-rate=69.1% uploads=17709 evicts=14637
+up=22.8GiB served=330.8GiB yield=14.51x admit=3 window=32
+```
+
+A 69% hit rate at 64 slots on fresh prose sits on the published LRU curve for this model
+class. Yield, bytes served per byte uploaded, is the number to watch rather than hit rate,
+because hit rate alone hides churn.
+
+Combined with the cache itself, decode on this machine went **34 to 50-54 tokens per
+second** at 131K context, with output unchanged.
 
 ## The Q2_0 decode problem
 

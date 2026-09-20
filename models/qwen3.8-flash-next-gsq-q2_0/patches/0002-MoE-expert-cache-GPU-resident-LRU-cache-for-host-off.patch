@@ -1,7 +1,7 @@
 From 27b872bda48ba45f94531b75ad9e2130e61391f7 Mon Sep 17 00:00:00 2001
 From: csantiago78 <csantiago78@gmail.com>
 Date: Fri, 28 Aug 2026 02:36:40 -0400
-Subject: [PATCH 2/3] MoE expert cache: GPU-resident LRU cache for
+Subject: [PATCH 2/5] MoE expert cache: GPU-resident LRU cache for
  host-offloaded expert weights
 
 Measured on Qwen3.8-Flash-Next UD-Q4_K_XL (512 experts, 10 routed, 28 expert
