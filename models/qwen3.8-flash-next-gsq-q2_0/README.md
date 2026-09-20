@@ -261,6 +261,28 @@ for even two resident layers, and decode was marginally lower.
 Recall was unaffected, so q4_0 KV remains a reasonable choice if VRAM is ever needed for
 something else. It just does not unlock expert residency.
 
+### Routing skew, measured on this model
+
+Using [`tools/moe-skew.cpp`](../../tools/), 512 real tokens each of an encyclopedia
+article and of C source, serving configuration (experts on CPU, GPU op-offload on).
+Layer 47 reads as degenerate in both and is excluded as unexplained.
+
+| Layer | Prose: distinct experts used | Prose: top 10% share | Code: distinct | Code: top 10% share |
+|---|---|---|---|---|
+| 0 | 392 of 512 | 37.8% | 417 | 42.6% |
+| 12 | 306 | 63.4% | 334 | 62.7% |
+| 24 | 300 | 63.7% | 297 | 70.9% |
+| 36 | 212 | 85.4% | 228 | 78.2% |
+| mean, all layers | — | 72.0% | — | 69.7% |
+
+Two conclusions. Within a document, routing is moderately concentrated and gets more so
+with depth: the top 20% of experts take 85-87% of selections, which is what makes a
+recency cache of 64-128 slots per layer worthwhile. But the hot sets **do not overlap**
+between prose and code; the twelve most-used experts in layer 0 are disjoint between the
+two texts. The skew is per-context, not global. That is why a static "pin the popular
+experts" scheme fails on this model and an LRU cache does not, and it matches the
+cross-workload traces others have published for this model family.
+
 ### On choosing *which* experts to pin
 
 You cannot. All 512 experts of a layer live in a single tensor
