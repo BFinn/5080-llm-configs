@@ -1,0 +1,22 @@
+[Unit]
+Description=Qwen3.8-27B llama-server (upstream, IQ3_S, q4_0 KV, draft-mtp, vision) on tailnet
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=%h/src/llama.cpp-upstream/build/bin
+ExecStart=%h/src/llama.cpp-upstream/build/bin/llama-server \
+  -m %h/ai-models/qwen3.8-27b/Qwen3.8-27B-UD-IQ3_S.gguf \
+  --mmproj %h/ai-models/qwen3.8-27b/mmproj-Qwen3.8-27B-Q8_0.gguf \
+  --spec-type draft-mtp --spec-draft-n-max 3 \
+  -ngl 99 -fa on -ctk q4_0 -ctv q4_0 -c 98304 -ub 512 \
+  --cache-reuse 256 --jinja --parallel 1 \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
+  --host __HOST_IP__ --port 8082 \
+  --api-key __API_KEY__ \
+  --alias qwen3.8-27b
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

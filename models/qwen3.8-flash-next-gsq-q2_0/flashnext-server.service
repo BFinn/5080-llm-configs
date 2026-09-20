@@ -1,0 +1,31 @@
+[Unit]
+Description=Qwen3.8-Flash-Next GSQ-RCO Q2_0 llama-server (AVX2 Q2_0 build, dio pinned, experts on CPU, GPU op-offload) on tailnet
+After=network-online.target tailscaled.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=%h/src/llama.cpp-q2avx2/build/bin
+# per-token active-expert matmuls go to the GPU's Q2_0 kernel (decode 33 t/s vs 10 scalar).
+# Drop this line to use the AVX2 CPU kernel path instead (same decode, ~same PPL, less PCIe).
+Environment=GGML_OP_OFFLOAD_MIN_BATCH=1
+ExecStart=%h/src/llama.cpp-q2avx2/build/bin/llama-server \
+  -m %h/ai-models/flashnext-gsq-q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf \
+  --no-warmup -lm dio \
+  -ngl 99 -ot ffn_.*_exps=CPU \
+  -fa on -ctk q8_0 -ctv q8_0 -c 262144 -b 4096 -ub 2048 -t 12 -tb 12 \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
+  --cache-reuse 256 --jinja --parallel 1 \
+  --host __HOST_IP__ --port 8082 \
+  --api-key __API_KEY__ \
+  --alias qwen3.8-flash-next
+# 2026-09-20 hardening: pinned RSS ~34 GiB + PLE page cache; cap keeps a blow-up inside this cgroup.
+MemoryMax=52G
+MemorySwapMax=0
+OOMScoreAdjust=500
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target
