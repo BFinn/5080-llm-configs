@@ -1,20 +1,23 @@
 [Unit]
-Description=Qwen3.8-Flash-Next GSQ-RCO Q2_0 llama-server (AVX2 Q2_0 build, dio pinned, experts on CPU, GPU op-offload) on tailnet
+Description=Qwen3.8-Flash-Next GSQ-RCO Q2_0 llama-server (LRU expert cache PR#27861 + AVX2 Q2_0 + sync fix, dio, 131K) on tailnet
 After=network-online.target tailscaled.service
 StartLimitIntervalSec=600
 StartLimitBurst=3
 
 [Service]
 Type=simple
-Environment=LD_LIBRARY_PATH=%h/src/llama.cpp-q2avx2/build/bin
-# per-token active-expert matmuls go to the GPU's Q2_0 kernel (decode 33 t/s vs 10 scalar).
-# Drop this line to use the AVX2 CPU kernel path instead (same decode, ~same PPL, less PCIe).
-Environment=GGML_OP_OFFLOAD_MIN_BATCH=1
-ExecStart=%h/src/llama.cpp-q2avx2/build/bin/llama-server \
+Environment=LD_LIBRARY_PATH=%h/src/llama.cpp-lru-new/build/bin
+# 2026-09-21: GPU-resident LRU expert cache (llama.cpp PR #27861, unmerged) on branch lru-new.
+# Cache misses are computed by the CPU mul_mat_id (AVX2 Q2_0 kernel), so GGML_OP_OFFLOAD_MIN_BATCH
+# must stay at its default: op-offload + cache measured at half speed. 64 slots/layer = ~4 GiB VRAM,
+# which forces context down from 262144 to 131072. Measured: decode 34 -> 49-51 t/s (fresh prose),
+# 34 -> 44.5 (extractive); output identical to the uncached path. Previous unit: *.bak.*-pre-lru
+ExecStart=%h/src/llama.cpp-lru-new/build/bin/llama-server \
   -m %h/ai-models/flashnext-gsq-q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf \
   --no-warmup -lm dio \
   -ngl 99 -ot ffn_.*_exps=CPU \
-  -fa on -ctk q8_0 -ctv q8_0 -c 262144 -b 4096 -ub 2048 -t 12 -tb 12 \
+  --moe-expert-cache 64 --moe-expert-cache-inserts 2 \
+  -fa on -ctk q8_0 -ctv q8_0 -c 131072 -b 4096 -ub 2048 -t 12 -tb 12 \
   --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
   --cache-reuse 256 --jinja --parallel 1 \
   --host __HOST_IP__ --port 8082 \

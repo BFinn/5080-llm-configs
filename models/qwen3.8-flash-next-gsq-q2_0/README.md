@@ -297,6 +297,74 @@ tensor on the GPU. The `ffn_.*_exps` pattern deliberately does not match `ffn_*_
 the shared experts (about 2 MiB per layer, fired on every token) stay resident along with
 the router and attention. Getting that wrong costs you on every token.
 
+## Breaking the wall: a GPU-resident LRU expert cache
+
+Everything above says decode is bounded by 633 MiB of expert streaming per token and that
+no static placement helps. The routing measurement says the working set *within a
+context* is small and recency-local. The matching fix is a cache of recently used expert
+slices in VRAM, which is exactly what an unmerged llama.cpp pull request implements
+(ggml-org/llama.cpp#27861). It is deployed here.
+
+**Mechanism.** The fused expert tensor stays whole in host RAM. Each cached layer gets a
+companion device tensor of K slots plus one all-zero slot. Expert ids are remapped
+through a device table into a second `mul_mat_id` over the cache; uncached ids hit the
+zero slot and contribute nothing. The host `mul_mat_id` receives the same table and skips
+cached ids. The two outputs are summed, so the split is exact. Uploads are throttled and
+asynchronous. Decode-only (`n_tokens == 1`), so prefill is untouched.
+
+**What is deployed** (branch `lru-new`, patches in [`patches/`](patches/)):
+the PR commit cherry-picked onto current master, the AVX2 Q2_0 kernel, and a one-line
+fix that synchronizes the backend before the cache publishes new slot tables. The PR head
+has that sync commented out; a still-running CUDA graph could read a torn table. Flags:
+`--moe-expert-cache 64 --moe-expert-cache-inserts 2`.
+
+**Two things you must get right.** Misses are computed by the CPU matmul, because only the
+CPU op understands the skip table. So `GGML_OP_OFFLOAD_MIN_BATCH` must stay at its default
+when the cache is on; combining them is not corrupt, just half the speed (16.8 tok/s). That
+also means the CPU path needs a real Q2_0 kernel, i.e. the AVX2 patch is a prerequisite,
+not an optimisation. And the PR's own base predates lazy PLE loading, so on that base
+`-lm dio` pins all 62 GiB and the process is OOM-killed; use current master or `-lm mmap`.
+
+### Measured, clean run (newer base, direct IO, nothing else running)
+
+| 131K context | VRAM | Fresh prose | Extractive | Prefill 30K |
+|---|---|---|---|---|
+| No cache (CPU miss path) | 9.6 GiB | 32.9-34.8 tok/s | 34.0 | 654 (cold) |
+| **Cache, 64 slots/layer** | 13.7 GiB | **48.8-51.5** | **44.5** | 1,101 |
+| Cache, 80 slots/layer | 14.7 GiB | 50.6-54.3 | 44.8 | 1,086 |
+| Cache, 96 slots/layer | OOM at load | | | |
+
+Decode **+50%** on fresh prose and **+31%** on extractive output. One slot per layer
+costs 63 MiB across 48 layers, so 64 slots is 4 GiB. The prefill column is not a cache
+effect: the no-cache arm ran first with a cold page cache; warm prefill at this micro-batch
+is ~1,100 either way.
+
+Correctness: extractive output at temperature 0 was **identical word-for-word** to the
+uncached run at both slot counts, and decode-mode perplexity (`-b 1 -ub 1`, which forces
+`n_tokens == 1` so the cache is exercised) was 3.269 with the cache against 3.293 without,
+inside the error bars.
+
+**Live endpoint after deployment:** 44 tok/s with a cold cache, 49.7 warm. A 119K-token
+prompt prefilled at 825 tok/s (145 s) and decoded at 19.7 tok/s with 3/3 planted facts
+recalled and no allocation failure at 14.2 GiB. At that depth attention dominates and the
+cache gain shrinks; the headline gain is for prompts under ~60K.
+
+**The cost is context.** 64 slots do not fit beside a 262K KV cache; 20 slots do not
+either. The deployed context is now 131,072. That is the trade this machine offers: 262K
+at 34 tok/s, or 131K at 50.
+
+### Slot count on a 16 GB card
+
+| Slots/layer | VRAM for cache | Fits at 131K? |
+|---|---|---|
+| 64 | 4.0 GiB | yes, ~2.5 GiB headroom |
+| 80 | 5.0 GiB | yes, ~1.5 GiB headroom, no gain over 64 |
+| 96 | 6.0 GiB | no |
+
+The admission-gate patch from the PR thread (`--moe-expert-cache-admit`, windowed use
+counter) is not applied yet; it reportedly cuts upload churn 5x on weak host RAM and is
+the next thing to try.
+
 ## The Q2_0 decode problem
 
 Worth its own section, because the 10 tok/s decode looked like a dead end.

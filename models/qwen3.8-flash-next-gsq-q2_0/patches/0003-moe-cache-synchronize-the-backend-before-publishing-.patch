@@ -1,0 +1,68 @@
+From ffff40053f303723a1d839a43704f1920401b7bb Mon Sep 17 00:00:00 2001
+From: bigfinn <bigfinn@users.noreply.github.com>
+Date: Mon, 21 Sep 2026 00:08:00 +0300
+Subject: [PATCH 3/3] moe-cache: synchronize the backend before publishing
+ cache updates
+
+The decode graph runs asynchronously on the backend stream while
+llama_moe_cache_step() publishes slot and id-table writes through
+ggml_backend_tensor_set on a different stream. A still-running graph could
+read a torn table or a half-uploaded slot. Synchronize first, only when a
+cache is active, so the inert path pays nothing.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
+---
+ src/llama-context.cpp  | 9 ++++++++-
+ src/llama-moecache.cpp | 4 ++++
+ src/llama-moecache.h   | 2 ++
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 317459d3b..15bb8b917 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -2049,7 +2049,14 @@ int llama_context::decode(const llama_batch & batch_inp) {
+     // wait for the computation to finish (automatically done when obtaining the model output)
+     //synchronize();
+ 
+-    // apply throttled MoE expert-cache updates between graph executions
++    // apply throttled MoE expert-cache updates between graph executions.
++    // The graph compute above is asynchronous on the backend stream, while the cache
++    // publishes slot/table writes via tensor_set on a different stream. Without a sync
++    // here a still-running decode graph can read a torn table or a half-written slot
++    // (race reported in the PR thread). Only pay the sync when the cache is active.
++    if (llama_moe_cache_active()) {
++        synchronize();
++    }
+     llama_moe_cache_step();
+ 
+     return 0;
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index 4e0732e80..adcacba5e 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -330,6 +330,10 @@ const llama_moe_cache_layer * llama_moe_cache_lookup(const ggml_tensor * up_exps
+     return &g_cache->layers[it->second].pub;
+ }
+ 
++bool llama_moe_cache_active() {
++    return g_cache != nullptr;
++}
++
+ void llama_moe_cache_step() {
+     moe_cache * mc = g_cache;
+     if (!mc) {
+diff --git a/src/llama-moecache.h b/src/llama-moecache.h
+index ed739f90c..f5da60d6a 100644
+--- a/src/llama-moecache.h
++++ b/src/llama-moecache.h
+@@ -59,3 +59,5 @@ const llama_moe_cache_layer * llama_moe_cache_lookup(const ggml_tensor * up_exps
+ 
+ // apply throttled LRU updates; call between graph executions only
+ void llama_moe_cache_step();
++// true once init created a cache (slots > 0); lets callers skip work when inert
++bool llama_moe_cache_active();
+-- 
+2.43.0
+
