@@ -150,6 +150,131 @@ dense 27B at 3 bits by a wide margin. The vendor reports 89.07 task average agai
 
 ---
 
+## Where the ceiling actually is
+
+Everything above tunes a machine that is already at a hard limit. It is worth stating the
+limit precisely, because it decides which optimisations are worth attempting and which are
+guaranteed to fail.
+
+Summing the expert tensors from the GGUF: routed experts are 31.64 GiB across 48 layers,
+675 MiB per layer. With 10 of 512 experts firing per layer, **every decoded token requires
+633 MiB of expert weights to move out of DRAM.**
+
+| Available bandwidth | Implied decode ceiling | Observed |
+|---|---|---|
+| 20 GB/s (measured PCIe during prefill) | 30.1 tok/s | 33-34 tok/s |
+| 33.6 GB/s (this machine's full DRAM bandwidth, STREAM triad) | 50.6 tok/s | — |
+| ~56 GB/s (same DIMMs at their rated speed) | 84.4 tok/s | — |
+
+Decode is therefore not near the ceiling, it *is* the ceiling. This also explains a result
+that looked like noise: the AVX2 CPU expert path and the GPU offload path measure the same,
+30.0-34.7 against 32.7-34.1. Both must pull the same 633 MiB per token out of DRAM. One
+computes locally, the other ships it over PCIe. The wall is upstream of both.
+
+### The host memory clock is the single biggest lever
+
+The DIMMs in this machine are a Kingston KF560C36 kit, rated DDR5-6000 CL36. They are
+running at **3600 MT/s**, below even the 4800 JEDEC default, because EXPO is off in BIOS.
+Measured bandwidth is 33.6 GB/s against roughly 56 GB/s at rated speed.
+
+Because decode scales directly with bandwidth, this is worth up to ~1.5x on decode and
+prefill for a BIOS toggle, and unlike every software lever below it costs no VRAM. Two
+dual-rank 32 GB modules are hard on an AM5 memory controller, so expect to land at
+5200-5600 rather than the full 6000. Even 5200 is 1.44x. **Not yet applied.**
+
+## Tuning: what helped, what did not
+
+Measured on this machine at 131,072 context unless stated. Each timed prefill uses a
+distinct prompt, because an earlier attempt measured a prefix-cache hit (4 tokens, 0.2 s)
+and reported a meaningless number.
+
+| Configuration | VRAM | Decode | Prefill |
+|---|---|---|---|
+| micro-batch 2048, no residency | 9.6 GiB | 34.0 tok/s | 1,103 tok/s |
+| **micro-batch 4096**, no residency | 13.5 GiB | 34.0 tok/s | **1,378 tok/s** |
+| micro-batch 2048, **6 expert layers resident** | 13.6 GiB | **36.7 tok/s** | 1,149 tok/s |
+| micro-batch 2048, 9 expert layers resident | 15.6 GiB | 38.8 tok/s | OOM on long prefill |
+
+**Micro-batch 4096 buys 25% prefill** at no decode cost. **Pinning expert layers in VRAM
+buys decode** in line with the bandwidth model: 6 of 48 layers removes 12.5% of the
+per-token budget and returns 7.9%; 9 layers removes 18.75% and returns 14.1%. Nine layers
+idles fine and dies with CUDA OOM when a long prefill needs its compute buffers.
+
+The catch: **both levers cost the same ~4 GiB of VRAM, so you can have one, not both.** And
+at the deployed 262K context neither fits at all, because context itself has already spent
+the headroom. Hence the deployed configuration stays as it is.
+
+| Goal | Context | Config | Prefill | Decode |
+|---|---|---|---|---|
+| Full context (deployed) | 262,144 | ub 2048, q8_0 KV | 1,102 | 34.1 |
+| Max prefill | 131,072 | ub 4096, q8_0 KV | 1,378 | 34.0 |
+| Max decode | 131,072 | ub 2048, 6 layers resident | 1,149 | 36.7 |
+
+### Rejected: speculative decoding
+
+This is the counterintuitive one, and it generalises to any sparse MoE.
+
+n-gram speculative decoding (no draft model needed) drafted almost perfectly on an
+extractive task: **0.98 acceptance, 186 of 189 tokens accepted, mean accepted run 5.89.**
+Decode still got *slower*, 30.1 against 33.8.
+
+| Speculation mode | Fresh prose | Extractive |
+|---|---|---|
+| none | 32.8 tok/s | 33.8 tok/s |
+| ngram-mod | 34.0 | 30.1 |
+| ngram-map-k4v | 34.2 | 33.5 |
+
+Speculation pays on **dense** models because verifying six drafted tokens reuses the same
+weights six times in one pass. On a **sparse MoE with per-token routing**, six tokens route
+to the union of their experts, so the verification batch streams roughly six times the bytes
+to produce six tokens. You convert six small transfers into one large transfer of the same
+total size, then pay the drafting overhead. No win is available at any acceptance rate.
+
+Corollary: the MTP draft head being incompatible with this GGUF costs nothing.
+
+### Rejected: a wider SIMD kernel
+
+This CPU is Zen 4 and has full AVX-512 including VNNI; the build detects it. An AVX-512
+VNNI version of the Q2_0 kernel is writable and would not help. The existing AVX2 kernel
+already reaches 8.0 GB/s single-threaded, so roughly four threads saturate the 33.6 GB/s
+the memory system can deliver, and there are twelve. Adding arithmetic throughput to a
+kernel that is waiting on DRAM buys nothing.
+
+This is also why the 9.5x microbenchmark figure became 3.1x at model level. The
+microbenchmark ran on cache-resident data. The model does not.
+
+For completeness, Q2_0 also has no repack GEMM/GEMV kernels, which normally accelerate CPU
+prompt processing. Also moot here, since prefill runs on the GPU.
+
+### Rejected: q4_0 KV cache
+
+The theory was that halving the KV cache at 262K would free enough VRAM to pin expert layers
+without giving up context. It freed only 1.73 GiB, not the ~5 GiB estimated, so the KV cache
+is a smaller share of VRAM than the 131K-versus-262K difference suggests. That is not enough
+for even two resident layers, and decode was marginally lower.
+
+| 262K context | VRAM | Decode | Prefill | Recall @59.7K |
+|---|---|---|---|---|
+| q8_0 KV (deployed) | 14.8 GiB | 34.1 tok/s | 1,102 tok/s | 3/3 |
+| q4_0 KV | 13.1 GiB | 33.4 tok/s | 1,100 tok/s | 3/3 |
+
+Recall was unaffected, so q4_0 KV remains a reasonable choice if VRAM is ever needed for
+something else. It just does not unlock expert residency.
+
+### On choosing *which* experts to pin
+
+You cannot. All 512 experts of a layer live in a single tensor
+(`blk.N.ffn_down_exps.weight`), and `--override-tensor` matches tensor names, so the
+smallest placeable unit is one layer's entire 675 MiB expert stack. Research that exploits
+expert popularity skew (LRU expert caches, activation tracing, speculative expert prefetch)
+needs a dynamic caching layer llama.cpp does not have. Layer choice itself appears close to
+uniform, so maximise the count and do not agonise over identity.
+
+What *does* matter, and what this configuration gets right, is keeping every always-on
+tensor on the GPU. The `ffn_.*_exps` pattern deliberately does not match `ffn_*_shexp`, so
+the shared experts (about 2 MiB per layer, fired on every token) stay resident along with
+the router and attention. Getting that wrong costs you on every token.
+
 ## The Q2_0 decode problem
 
 Worth its own section, because the 10 tok/s decode looked like a dead end.

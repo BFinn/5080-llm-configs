@@ -8,13 +8,19 @@ The theme across these entries: on a 16 GB consumer card, the interesting questi
 rarely "does it fit in VRAM". It is which tensors to leave in host RAM and how fast you
 can stream them across PCIe.
 
+Consequence worth stating up front: for a sparse MoE served this way, throughput is set by
+**bytes moved per token divided by memory bandwidth**, not by arithmetic. That single fact
+predicts which optimisations work and which cannot. See
+[where the ceiling actually is](models/qwen3.8-flash-next-gsq-q2_0/#where-the-ceiling-actually-is).
+
 ## Hardware baseline
 
 | | |
 |---|---|
 | GPU | NVIDIA GeForce RTX 5080, 16 GB, driver 575.64.03, CUDA 12.9 |
 | CPU | AMD Ryzen 9 7900X, 12 cores / 24 threads, 64 MiB L3 |
-| RAM | 64 GB DDR5 (2 x 32 GB), running at 3600 MT/s |
+| RAM | 64 GB DDR5 (2 x 32 GB Kingston KF560C36, rated 6000 CL36), **running at 3600 MT/s, EXPO off** |
+| RAM bandwidth | 33.6 GB/s measured (STREAM triad, 12 threads) |
 | Storage | Samsung 990 PRO 2 TB NVMe |
 | PCIe | Gen5 x16 (nvidia-smi reports Gen1 at idle; that is a power state, not the link) |
 | OS | Ubuntu 24.04.3 LTS, kernel 6.14, gcc 12.4 |
