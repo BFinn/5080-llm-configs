@@ -92,6 +92,35 @@ Clean attribution for the prefill gain: **1.9x from halving expert bytes** (55.4
 | Host RSS | 34.8 GiB |
 | Context | 262,144 tokens, single slot |
 
+### Throughput vs context length
+
+The decode number above comes from a short prompt. Both rates drop as the prompt grows.
+Measured cold on the live endpoint, thinking off, temperature 0.
+
+| Prompt tokens | Prefill | Time to first token | Decode |
+|---|---|---|---|
+| 27 | — | — | 31.8 tok/s |
+| ~1.5K | — | — | 33.5 - 34.1 tok/s |
+| 31,571 | 1,189 tok/s | 26.5 s | — |
+| 58,006 | 1,025 tok/s | 56.6 s | 25.4 tok/s |
+| 187,236 | 728 tok/s | 257.1 s | 16.9 tok/s |
+
+At 187K, decode is about half the headline rate. Use the row nearest your prompt size.
+
+Accuracy held up. Planted facts came back 2/2 at 58K and 3/3 at 187K, with them placed at
+the start, middle and end of the prompt.
+
+Prefix caching is worth more than any of this. The second turn of a 31.5K conversation
+reused 31,576 tokens and came back in 1.8 s instead of 27.6 s. Keep the conversation
+going rather than re-sending the context.
+
+### Queueing behaviour
+
+`--parallel 1` means a second caller waits instead of sharing the GPU. Three requests of
+about 5 s each, sent at the same time, came back at 5.4 s, 10.5 s and 15.7 s. Each ran at
+full speed in turn. Queue time simply adds up, so firing agent calls in parallel buys
+nothing here.
+
 ### The SSD drops out entirely
 
 Measured with caches dropped first. This is the payoff of picking a quant that fits RAM.
@@ -183,13 +212,17 @@ Things that cost real time to discover.
 8. **This model is a reasoner.** With thinking enabled, a small `max_tokens` is consumed
    entirely by `reasoning_content` and `content` comes back empty. An early A/B of mine
    silently compared two empty strings because of this.
+9. **An old alias does not fail. It serves whatever is loaded.** Ask for
+   `"model": "qwen3.8-27b"` and you get HTTP 200, answered by Flash-Next, with
+   `qwen3.8-flash-next` in the response. Old callers keep working and record the wrong
+   model against their output. Check the `model` field that comes back.
 
 ---
 
 ## Reproducing
 
 ```bash
-# 1. Model (67.3 GB, 2 shards) from ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, Q2_0
+# 1. Model (66.4 GB, 2 shards) from ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, Q2_0
 # 2. Build llama.cpp master ec92815 with CUDA, then apply the kernel patch:
 git apply patches/q2_0-avx2-kernel.patch && cmake --build build -j
 # 3. Install the unit, substituting __API_KEY__ and __HOST_IP__:

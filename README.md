@@ -24,10 +24,12 @@ can stream them across PCIe.
 
 | Model | Quant | Size | Context | Prefill | Decode | Entry |
 |---|---|---|---|---|---|---|
-| Qwen3.8-Flash-Next (512x56B MoE) | GSQ-RCO Q2_0 | 67.3 GB | 262,144 | 1,079 tok/s | 33 tok/s | [entry](models/qwen3.8-flash-next-gsq-q2_0/) |
+| Qwen3.8-Flash-Next (512x56B MoE) | GSQ-RCO Q2_0 | 66.4 GB | 262,144 | 1,079 tok/s | 33 tok/s | [entry](models/qwen3.8-flash-next-gsq-q2_0/) |
 | Qwen3.8-27B (dense, vision) | UD-IQ3_S | 12 GB | 98,304 | — | — | [entry](models/qwen3.8-27b/) |
 
-Prefill figures are for a 30K-token prompt, warm.
+Prefill figures are for a 30K-token prompt, warm. Both rates drop on longer prompts: at
+187K it is 728 tok/s prefill and 16.9 tok/s decode. See
+[throughput vs context length](models/qwen3.8-flash-next-gsq-q2_0/#throughput-vs-context-length).
 
 ## Layout
 
