@@ -88,7 +88,7 @@ Clean attribution for the prefill gain: **1.9x from halving expert bytes** (55.4
 | Time to first token, 30K prompt | 28 s |
 | Time to first token, 190K prompt | ~245 s |
 | Cold start to serving | 26 s |
-| VRAM | 14.8 GiB of 16.3 |
+| VRAM | 14.8 GiB of 15.92 usable (16303 MiB) |
 | Host RSS | 34.8 GiB |
 | Context | 262,144 tokens, single slot |
 
@@ -250,8 +250,22 @@ prompt processing. Also moot here, since prefill runs on the GPU.
 
 The theory was that halving the KV cache at 262K would free enough VRAM to pin expert layers
 without giving up context. It freed only 1.73 GiB, not the ~5 GiB estimated, so the KV cache
-is a smaller share of VRAM than the 131K-versus-262K difference suggests. That is not enough
-for even two resident layers, and decode was marginally lower.
+is a smaller share of VRAM than the 131K-versus-262K difference suggests. At 683 MiB per
+layer that buys **two** resident layers, not the seven the estimate implied, and decode was
+marginally lower.
+
+Two is not worth taking. By the bandwidth model above, two layers remove 4.2% of the
+per-token byte budget and should return under 3%, roughly +1 tok/s on 34.1. They would also
+leave about 1.5 GiB of headroom at 262K, between the 2.3 GiB that worked at six resident
+layers and the 0.3 GiB that OOMed at nine — and a 262K prefill needs more scratch than the
+131K those rows were measured at. Untested, small upside, real OOM risk.
+
+Why the KV cache is so small in the first place, from the GGUF metadata: only **12 of the 48
+layers hold one**, because `full_attention_interval` is 4 and the other 36 are gated-delta-net
+layers whose state is fixed-size regardless of sequence length. Those 12 use `head_count_kv` 2
+against `head_count` 24. That is 12 × 2 × (K+V) × 256 = 12,288 values per token, about
+13.1 KB/token at q8_0, so ~3.2 GiB at 262K. Estimating KV from context length alone, as if
+every layer cached and heads were ungrouped, is what produced the ~5 GiB figure.
 
 | 262K context | VRAM | Decode | Prefill | Recall @59.7K |
 |---|---|---|---|---|
@@ -356,11 +370,16 @@ at 34 tok/s, or 131K at 50.
 
 ### Slot count on a 16 GB card
 
-| Slots/layer | VRAM for cache | Fits at 131K? |
-|---|---|---|
-| 64 | 4.0 GiB | yes, ~2.5 GiB headroom |
-| 80 | 5.0 GiB | yes, ~1.5 GiB headroom, no gain over 64 |
-| 96 | 6.0 GiB | no |
+Headroom is against the card's 15.92 GiB usable (16303 MiB), not a round 16.
+
+| Slots/layer | VRAM for cache | Total VRAM | Fits at 131K? |
+|---|---|---|---|
+| 64 | 4.0 GiB | 13.7 GiB | yes, ~2.2 GiB headroom |
+| 80 | 5.0 GiB | 14.7 GiB | yes, ~1.2 GiB headroom, no gain over 64 |
+| 96 | 6.0 GiB | — | no, OOM at load |
+
+Confirmed in service: the deployed 64-slot configuration sits at 13.82 GiB with **1.65 GiB
+free**, and that survives a 121K-token prefill.
 
 ### Admission gate: the second win
 

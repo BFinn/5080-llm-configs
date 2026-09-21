@@ -17,7 +17,7 @@ predicts which optimisations work and which cannot. See
 
 | | |
 |---|---|
-| GPU | NVIDIA GeForce RTX 5080, 16 GB, driver 575.64.03, CUDA 12.9 |
+| GPU | NVIDIA GeForce RTX 5080, 16 GB (16303 MiB = **15.92 GiB usable**), driver 575.64.03, CUDA 12.9 |
 | CPU | AMD Ryzen 9 7900X, 12 cores / 24 threads, 64 MiB L3 |
 | RAM | 64 GB DDR5 (2 x 32 GB Kingston KF560C36, rated 6000 CL36), **running at 3600 MT/s, EXPO off** |
 | RAM bandwidth | 33.6 GB/s measured (STREAM triad, 12 threads) |
