@@ -144,6 +144,10 @@ never fit in 61 GB of RAM.
 | Needle-in-a-haystack @ 190K | 19/20 | — | — |
 | Structured-output probe (64K/112K/262K) | 24/24 | 24/24 | — |
 
+All three measured with a q8_0 KV cache, so the column compares weight quantization and
+nothing else. The 27B's [own entry](../qwen3.8-27b/) quotes 6.8412 instead, because it is
+deployed with a q4_0 KV cache.
+
 Quantizing to ~2.4 bpw costs 10.5% perplexity against the 4-bit build, and still beats a
 dense 27B at 3 bits by a wide margin. The vendor reports 89.07 task average against
 ~93.1 for the base model, so about 95.6% of full quality retained.
