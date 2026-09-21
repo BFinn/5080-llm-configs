@@ -43,12 +43,19 @@ Prefill figures are for a 30K-token prompt, warm. Both rates drop on longer prom
 models/<model>/README.md     what was configured, tested, and measured
 models/<model>/*.service     the systemd unit actually used, secrets redacted
 models/<model>/patches/      any source patches the configuration depends on
+scripts/benchmark.sh         the measurement method — every entry uses it
+scripts/bench/               recall and structured-output probes it calls
 scripts/llm-run.sh           guarded launcher for experiments
+tools/moe-skew.cpp           measure MoE expert-routing skew on your own model
 ```
 
 ## Conventions
 
 - Units are redacted. Replace `__API_KEY__` and `__HOST_IP__` before use.
+- Numbers come from [`scripts/benchmark.sh`](scripts/README.md), so entries compare
+  like for like. An entry quoting throughput says which commit it was measured at.
+  Numbers that predate the current method are left blank rather than quoted from
+  memory — a blank cell is honest, a stale one is not.
 - Paths in the units use systemd's `%h` specifier, which expands to the invoking user's
   home directory. They assume llama.cpp builds live in `~/src` and GGUFs in `~/ai-models`;
   adjust those two path fragments if yours differ.
