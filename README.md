@@ -49,6 +49,9 @@ scripts/llm-run.sh           guarded launcher for experiments
 ## Conventions
 
 - Units are redacted. Replace `__API_KEY__` and `__HOST_IP__` before use.
+- Paths in the units use systemd's `%h` specifier, which expands to the invoking user's
+  home directory. They assume llama.cpp builds live in `~/src` and GGUFs in `~/ai-models`;
+  adjust those two path fragments if yours differ.
 - Every number is measured on the hardware above. Derived or vendor-reported figures are
   labelled as such.
 - Configurations that were tried and rejected are kept, with the reason. They are usually
