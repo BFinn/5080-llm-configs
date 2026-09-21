@@ -1,0 +1,73 @@
+NOTICE
+======
+
+This repository is MIT licensed (see LICENSE). Not everything in it is
+originally mine, and this file records what is whose.
+
+Mine, under the LICENSE in this repository
+------------------------------------------
+
+  README.md and everything under models/*/README.md
+  models/*/*.service
+  scripts/benchmark.sh, scripts/bench/*, scripts/llm-run.sh
+  tools/moe-skew.cpp
+
+Derived from llama.cpp
+----------------------
+
+Everything under models/qwen3.8-flash-next-gsq-q2_0/patches/ is a patch
+against llama.cpp (https://github.com/ggml-org/llama.cpp), which is MIT
+licensed. Applying any of them produces a modified copy of llama.cpp, and that
+copy is governed by llama.cpp's license, not by this one:
+
+  MIT License
+  Copyright (c) 2023-2026 The ggml authors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+Third-party patch, redistributed with attribution
+-------------------------------------------------
+
+  patches/0002-MoE-expert-cache-GPU-resident-LRU-cache-for-host-off.patch
+
+is not my work. It is the GPU-resident LRU expert cache from llama.cpp pull
+request #27861 by csantiago78:
+
+  https://github.com/ggml-org/llama.cpp/pull/27861
+
+The PR is unmerged at the time of writing. It was submitted to a public,
+MIT-licensed repository, so it carries that project's license terms, and the
+commit's original authorship is preserved in the patch header unchanged. It is
+included here only so that the configuration this repository documents can
+actually be reproduced.
+
+Patches 0003, 0004 and 0005 are my changes on top of that work: a backend
+synchronisation fix, a windowed admission gate, and telemetry. They are
+described in the Flash-Next entry.
+
+Not included here
+-----------------
+
+Model weights. The GGUF files this repository configures are published by their
+own authors under their own licenses, which are not affected by this one. Check
+the terms on the model you download.
+
+wikitext-2-raw, used for the perplexity phase of scripts/benchmark.sh, is
+CC BY-SA and is not redistributed here. Fetch it yourself and pass
+--ppl-corpus.

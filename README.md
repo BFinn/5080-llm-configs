@@ -80,3 +80,15 @@ disabled, so a runaway is reclaimed inside that cgroup:
 
 Worth pairing with `OOMScoreAdjust=-1000` drop-ins on sshd, NetworkManager, and your VPN
 or mesh daemon, so that losing a benchmark never means losing remote access.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
+
+The patches under `models/*/patches/` are a separate matter: they are diffs against
+llama.cpp, which is MIT licensed by The ggml authors, and one of them is not my work at
+all — it is the expert cache from [llama.cpp PR #27861](https://github.com/ggml-org/llama.cpp/pull/27861)
+by csantiago78, redistributed with its authorship intact so the configuration documented
+here can be reproduced. [NOTICE](NOTICE) records who wrote what.
+
+Model weights are not covered by any of this. They carry their own licenses.
