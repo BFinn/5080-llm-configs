@@ -34,7 +34,8 @@ the whole configuration is about.
 ## Final configuration
 
 Full unit file: [`flashnext-server.service`](flashnext-server.service).
-Replace `__API_KEY__` and `__HOST_IP__` before use.
+Replace `__HOST_IP__`, and put the API key in `~/.config/llama/api-key` at mode 600 —
+`--api-key` on the command line is readable by every local user via `ps`.
 
 ```bash
 llama-server \
@@ -499,7 +500,10 @@ Things that cost real time to discover.
 # 1. Model (66.4 GB, 2 shards) from ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, Q2_0
 # 2. Build llama.cpp master ec92815 with CUDA, then apply the kernel patch:
 git apply patches/q2_0-avx2-kernel.patch && cmake --build build -j
-# 3. Install the unit, substituting __API_KEY__ and __HOST_IP__:
+# 3. Put the API key where the unit expects it, readable only by you:
+install -d -m 700 ~/.config/llama && install -m 600 /dev/null ~/.config/llama/api-key
+printf '%s\n' 'YOUR-KEY' > ~/.config/llama/api-key
+# 4. Install the unit, substituting __HOST_IP__:
 cp flashnext-server.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now flashnext-server
 ```

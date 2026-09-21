@@ -56,7 +56,12 @@ tools/moe-skew.cpp           measure MoE expert-routing skew on your own model
 
 ## Conventions
 
-- Units are redacted. Replace `__API_KEY__` and `__HOST_IP__` before use.
+- Units are redacted. Replace `__HOST_IP__` before use.
+- **The API key is read from a file, not passed on the command line.** Put it in
+  `~/.config/llama/api-key` at mode 600 (`llama-server --api-key-file`). A key given as
+  `--api-key` ends up in `/proc/<pid>/cmdline`, which is world-readable, so every local
+  user on the machine can read it out of `ps`. An environment variable is better but not
+  equivalent: it still lands in the process environment and is inherited by children.
 - Numbers come from [`scripts/benchmark.sh`](scripts/README.md), so entries compare
   like for like. An entry quoting throughput says which commit it was measured at.
   Numbers that predate the current method are left blank rather than quoted from

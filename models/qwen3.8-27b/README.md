@@ -16,8 +16,8 @@ design point.
 | Speculative decode | draft-MTP, 3 draft tokens |
 | wikitext-2 perplexity @ c8192 | **6.8412** as deployed (q4_0 KV) |
 
-Unit: [`qwen38-server.service`](qwen38-server.service). Replace `__API_KEY__` and
-`__HOST_IP__`.
+Unit: [`qwen38-server.service`](qwen38-server.service). Replace `__HOST_IP__`, and put the
+API key in `~/.config/llama/api-key` at mode 600.
 
 ### What the KV quantization costs
 

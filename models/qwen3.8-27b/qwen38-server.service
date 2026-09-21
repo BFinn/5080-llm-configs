@@ -13,7 +13,7 @@ ExecStart=%h/src/llama.cpp-upstream/build/bin/llama-server \
   --cache-reuse 256 --jinja --parallel 1 \
   --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
   --host __HOST_IP__ --port 8082 \
-  --api-key __API_KEY__ \
+  --api-key-file %h/.config/llama/api-key \
   --alias qwen3.8-27b
 Restart=on-failure
 RestartSec=15
