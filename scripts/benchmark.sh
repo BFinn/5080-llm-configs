@@ -83,10 +83,16 @@ gen(){ # label payload-file
 import sys, json
 try:
     t = json.load(sys.stdin)['timings']
-    print('  %-22s decode %6.2f t/s   prefill %8.1f t/s (%s tok)'
-          % ('$1', t['predicted_per_second'], t['prompt_per_second'], t.get('prompt_n')))
+    n = t.get('prompt_n') or 0
+    # A reused prompt is served from the prefix cache, so its prompt_per_second
+    # describes the handful of uncached tokens and means nothing. Say so rather
+    # than printing a number someone might paste into a table.
+    pf = ('prefix hit, %d tok prefilled' % n) if n < 100 \
+         else ('prefill %8.1f t/s (%d tok)' % (t['prompt_per_second'], n))
+    print('  %-24s decode %6.2f t/s   %s'
+          % ('$1', t['predicted_per_second'], pf))
 except Exception:
-    print('  %-22s NO RESPONSE' % '$1')"
+    print('  %-24s NO RESPONSE' % '$1')"
 }
 
 # Deterministic long prompt, generated rather than vendored, so the fixture is
@@ -105,12 +111,15 @@ seeds = [
 # 1.24 tokens per word, measured against this tokenizer on this filler text.
 # Approximate by construction — the real count is reported as prompt_n below.
 words, need = [], int(target / 1.24)
-while len(words) < need:
+while len(words) < 2 * need:          # enough for two independent prompts
     words.extend(random.choice(seeds).split())
-text = " ".join(words[:need])
-json.dump({"prompt": text + "\n\nSummarise the preceding text in three sentences.",
-           "max_tokens": 192, "temperature": 0, "cache_prompt": True},
-          open(f"{out}/req_depth.json", "w"))
+tail = "\n\nSummarise the preceding text in three sentences."
+# Two independent long prompts. Timing the same one twice measures the prefix
+# cache, not prefill, so every timed prefill below gets fresh text.
+for name, lo in (("req_depth.json", 0), ("req_depth2.json", need)):
+    json.dump({"prompt": " ".join(words[lo:lo + need]) + tail,
+               "max_tokens": 192, "temperature": 0, "cache_prompt": True},
+              open(f"{out}/{name}", "w"))
 json.dump({"prompt": "Explain how a B-tree index works, in detail.",
            "max_tokens": 192, "temperature": 0, "cache_prompt": False},
           open(f"{out}/req_short.json", "w"))
@@ -128,11 +137,11 @@ if [[ "$PHASES" == *s* ]]; then
   echo "#### PHASE S: speed (short prompt, then ~${DEPTH_TOKENS} tokens cold and warm)"
   make_prompts
   if srv "$OUT/srv_speed.log"; then
-    gen "short r1"           "$OUT/req_short.json"
-    gen "short r2"           "$OUT/req_short.json"
-    gen "depth r1 (cold)"    "$OUT/req_depth.json"
-    gen "depth r2 (warm)"    "$OUT/req_depth.json"
-    gen "depth r3 (warm)"    "$OUT/req_depth.json"
+    gen "short r1"                "$OUT/req_short.json"
+    gen "short r2"                "$OUT/req_short.json"
+    gen "depth r1 (cold)"         "$OUT/req_depth.json"
+    gen "depth r2 (same prompt)"  "$OUT/req_depth.json"
+    gen "depth r3 (fresh prompt)" "$OUT/req_depth2.json"
     echo "  VRAM at idle+load: $(vram_used) MiB of $(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits) MiB"
     stop_srv
   fi

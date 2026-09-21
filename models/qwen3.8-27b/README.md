@@ -37,6 +37,41 @@ so it stays.
 Earlier versions of this page quoted 6.792 here. That is the q8_0 figure, and this unit
 runs q4_0.
 
+## Throughput
+
+Measured 2026-09-21 with [`scripts/benchmark.sh`](../../scripts/README.md), phases `sn`,
+at `--ctx 98304` with the deployed flags. Two arms differing only in speculative decoding.
+
+| | Short prompt | 30K prompt, cold | 30K prompt, warm decode | VRAM |
+|---|---|---|---|---|
+| No speculation | 58.9 / 59.1 tok/s | 1,865 tok/s prefill, 41.9 decode | 42.1 / 42.0 | 13.93 GiB |
+| **Deployed, draft-MTP n=3** | **106.8 / 109.0** | **1,756 tok/s prefill, 94.5 decode** | **95.7 / 96.0** | 15.24 GiB |
+
+Recall at depth, 15 needles planted through an 83K-token haystack: **14/15**, and the one
+miss is in the shallowest band (0-25%: 4/5; 25-50%: 2/2; 50-75%: 5/5; 75-100%: 3/3).
+
+### Speculative decoding wins here, and that is the point
+
+Draft-MTP is worth **+83% on a short prompt and +127% at 30K** on this model. The
+[Flash-Next entry](../qwen3.8-flash-next-gsq-q2_0/) measures the same feature, on the same
+GPU, with the same script, *losing* — 33.8 down to 30.1 tok/s at an almost perfect 0.98
+acceptance rate.
+
+Both results are correct, and together they are more useful than either alone. This model
+is dense: verifying four drafted tokens reads the 12 GB of weights once instead of four
+times, so acceptance converts directly into throughput. A sparse MoE routes each token to
+its own experts, so a verification batch streams roughly the union of four tokens' experts
+to produce four tokens, and there is no reuse to harvest. **Whether speculation pays is a
+property of the architecture, not of the acceptance rate.**
+
+The gain is larger at depth than on a short prompt because the baseline is slower there —
+attention over 30K of KV costs per token, and speculation amortises that across every
+accepted token too.
+
+The cost is headroom: the deployed arm sits at 15,609 MiB of 16,303, leaving 694 MiB.
+That is tighter than anything in the Flash-Next entry, and it includes the vision
+projector. Adding to this configuration means taking something out of it.
+
 Both units bind the same host, port, and API key with different `--alias` values, so
 swapping which model is live needs no client changes:
 
@@ -52,5 +87,5 @@ Only one of the two can run at a time.
 **Division of labour.** 27B for interactive work, vision, and agent loops. Flash-Next for
 long-context and hard reasoning, where a 4-minute prefill on a 190K prompt is acceptable.
 
-*Throughput numbers for this entry have not been re-measured under the current benchmark
-method and are deliberately left blank in the index rather than quoted from memory.*
+That split is now measured rather than asserted: this model decodes about twice as fast
+as Flash-Next on a short prompt and carries a third of the context.

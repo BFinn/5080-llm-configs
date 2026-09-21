@@ -31,10 +31,15 @@ predicts which optimisations work and which cannot. See
 | Model | Quant | Size | Context | Prefill | Decode | Entry |
 |---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next (512x56B MoE) | GSQ-RCO Q2_0 + LRU expert cache | 66.4 GB | 131,072 | 1,101 tok/s | 50-54 tok/s | [entry](models/qwen3.8-flash-next-gsq-q2_0/) |
-| Qwen3.8-27B (dense, vision) | UD-IQ3_S | 12 GB | 98,304 | — | — | [entry](models/qwen3.8-27b/) |
+| Qwen3.8-27B (dense, vision) | UD-IQ3_S | 12 GB | 98,304 | 1,756 tok/s | 95-96 tok/s | [entry](models/qwen3.8-27b/) |
 
-Prefill figures are for a 30K-token prompt, warm. Both rates drop on longer prompts: at
-187K it is 728 tok/s prefill and 16.9 tok/s decode. See
+Prefill figures are for a 30K-token prompt. Decode for the 27B is with its deployed
+speculative decoding, which is worth +127% at that depth; without it the same model
+decodes at 42 tok/s. Speculation *loses* on the MoE — see
+[why](models/qwen3.8-27b/#speculative-decoding-wins-here-and-that-is-the-point).
+
+Both Flash-Next rates drop on longer prompts: at 187K it is 728 tok/s prefill and
+16.9 tok/s decode. See
 [throughput vs context length](models/qwen3.8-flash-next-gsq-q2_0/#throughput-vs-context-length).
 
 ## Layout

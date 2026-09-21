@@ -40,9 +40,14 @@ it twice changing only what follows `--`; nothing else about the run differs.
   shipping a text fixture. Reproducible, and no third-party text in the repo.
   The word-to-token ratio is approximate; the real count is reported as
   `prompt_n` on every line, so quote that.
-- **Runs the short prompt twice and the long prompt three times.** The first
-  long run is cold, the rest are warm. An early version of this measurement
-  quoted a prefix-cache hit (4 tokens, 0.2 s) as a prefill figure.
+- **Every timed prefill uses fresh text.** Phase `s` generates two independent
+  long prompts: `r1` prefills one cold, `r2` re-sends the same one so you can
+  see the prefix cache work, `r3` prefills the second cold as an independent
+  sample. When a response comes back from the prefix cache the line says
+  `prefix hit` instead of printing a prefill rate, because that rate describes
+  only the handful of uncached tokens. Both the original version of this
+  measurement and the first version of this script quoted such a number as
+  prefill; it is a 4-token figure wearing a 30,000-token label.
 - **Skips perplexity unless you point at a corpus.** wikitext-2-raw is CC BY-SA
   and not ours to redistribute; fetch it yourself and pass `--ppl-corpus`.
 
