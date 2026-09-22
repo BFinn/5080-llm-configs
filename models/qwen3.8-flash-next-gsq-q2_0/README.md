@@ -457,16 +457,30 @@ Admit 3 with a 32-step window is 12-14% faster steady, 9-11% under topic shifts 
 12-15% on extractive output, over an already-cached baseline. It is deployed.
 
 Telemetry from the live service (`LLAMA_MOE_CACHE_DEBUG=1`, printed to stderr because the
-server does not surface library INFO logs at default verbosity):
+server does not surface library INFO logs at default verbosity). A short sample on fresh
+prose, and the same counters after 21 hours of ordinary use:
 
 ```
+# 768 steps, fresh prose
 steps=768 hits=256906 misses=114994 hit-rate=69.1% uploads=17709 evicts=14637
 up=22.8GiB served=330.8GiB yield=14.51x admit=3 window=32
+
+# 146,176 steps, 21 h of mixed traffic
+steps=146176 hits=41481858 misses=28699732 hit-rate=59.1% uploads=4049119 evicts=4046047
+up=5213.1GiB served=53406.2GiB yield=10.24x admit=3 window=32
 ```
 
-A 69% hit rate at 64 slots on fresh prose sits on the published LRU curve for this model
-class. Yield, bytes served per byte uploaded, is the number to watch rather than hit rate,
-because hit rate alone hides churn.
+**The short sample flatters it.** Fresh prose keeps the working set small; real traffic
+shifts topic, and both numbers settle lower — 59.1% and 10.24x against 69.1% and 14.51x.
+The long-run pair is the one to quote. The short one is what a benchmark gives you, not
+what the cache does across a day. 5.1 TiB uploaded to serve 52.2 TiB is still the
+difference between this machine being useful and not.
+
+Yield, bytes served per byte uploaded, is the number to watch rather than hit rate,
+because hit rate alone hides churn. Note that `uploads` tracking `evicts` almost exactly
+is *not* churn: a cache at capacity evicts one entry per insert by definition. Churn
+shows up as a collapsed yield — the ungated policy measured 1.4-1.7x on the weaker host
+in the PR thread, against 10.24x here.
 
 Combined with the cache itself, decode on this machine went **34 to 50-54 tokens per
 second** at 131K context, with output unchanged.
