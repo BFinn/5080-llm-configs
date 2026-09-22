@@ -11,7 +11,6 @@ read a torn table or a half-uploaded slot. Synchronize first, only when a
 cache is active, so the inert path pays nothing.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
 ---
  src/llama-context.cpp  | 9 ++++++++-
  src/llama-moecache.cpp | 4 ++++

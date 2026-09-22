@@ -8,7 +8,6 @@ Unpack via cvtepu8_epi32 + even/odd bit-pair spread, then mul_sum_i8_pairs_float
 Measured 9.5x single-thread vs scalar, 0 mismatches over 2000 random trials.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
 ---
  ggml/src/ggml-cpu/arch-fallback.h   |  1 -
  ggml/src/ggml-cpu/arch/x86/quants.c | 48 +++++++++++++++++++++++++++++

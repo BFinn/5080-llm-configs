@@ -15,7 +15,6 @@ collapses because of the churn; gating at 3 sightings per 16-step window
 cut uploads 5x and raised the hit rate there.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
 ---
  src/llama-moecache.cpp | 49 +++++++++++++++++++++++++++++++++++++-----
  1 file changed, 44 insertions(+), 5 deletions(-)

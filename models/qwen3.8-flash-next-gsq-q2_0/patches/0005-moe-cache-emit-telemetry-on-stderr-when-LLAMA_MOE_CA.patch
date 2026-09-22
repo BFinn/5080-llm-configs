@@ -8,7 +8,6 @@ llama-server does not surface library INFO logs at its default verbosity,
 so the periodic hit/upload/yield line never reached the server log.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_019xuWZ9SYYwGWmyfkzWwqFV
 ---
  src/llama-moecache.cpp | 4 ++++
  1 file changed, 4 insertions(+)
