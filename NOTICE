@@ -7,7 +7,8 @@ originally mine, and this file records what is whose.
 Mine, under the LICENSE in this repository
 ------------------------------------------
 
-  README.md and everything under models/*/README.md
+  README.md and every other README.md in this repository, including
+  models/qwen3.8-flash-next-gsq-q2_0/patches/README.md
   models/*/*.service
   scripts/benchmark.sh, scripts/bench/*, scripts/llm-run.sh
   tools/moe-skew.cpp
@@ -15,8 +16,8 @@ Mine, under the LICENSE in this repository
 Derived from llama.cpp
 ----------------------
 
-Everything under models/qwen3.8-flash-next-gsq-q2_0/patches/ is a patch
-against llama.cpp (https://github.com/ggml-org/llama.cpp), which is MIT
+Every *.patch file under models/qwen3.8-flash-next-gsq-q2_0/patches/ is a
+patch against llama.cpp (https://github.com/ggml-org/llama.cpp), which is MIT
 licensed. Applying any of them produces a modified copy of llama.cpp, and that
 copy is governed by llama.cpp's license, not by this one:
 

@@ -48,7 +48,8 @@ without the expert cache, at ~33 tok/s decode. See
 ```
 models/<model>/README.md     what was configured, tested, and measured
 models/<model>/*.service     the systemd unit actually used, secrets redacted
-models/<model>/patches/      any source patches the configuration depends on
+models/<model>/patches/      source patches the configuration depends on, with
+                             a README explaining the series and its order
 scripts/benchmark.sh         the measurement method — every entry uses it
 scripts/bench/               recall and structured-output probes it calls
 scripts/llm-run.sh           guarded launcher for experiments
