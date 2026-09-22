@@ -418,11 +418,13 @@ free**, and that survives a 121K-token prefill.
 The PR admits every miss to the cache unconditionally. A contributor to its thread found
 that this churns on weak host RAM, with uploads roughly equal to evictions and the hit
 rate collapsing *because* of the churn, and that a windowed use counter fixed it. No code
-was published, so the policy was reimplemented from the description
+had been published at that point, so the policy was reimplemented from the description
 ([`patches/0004-*`](patches/)): a `uint8` counter per layer and expert, halved every
 `LLAMA_MOE_CACHE_WINDOW` steps, and an uncached expert is uploaded only after
 `LLAMA_MOE_CACHE_ADMIT` sightings. Eviction stays LRU, which the same contributor found
-to beat frequency-based victims.
+to beat frequency-based victims. They have since posted a patch of their own to that
+thread, carrying the same policy as proper CLI options rather than environment variables;
+theirs is the better interface if this ever lands upstream.
 
 Same binary, 64 slots, 131K, ungated arms run first and last as the order control:
 
