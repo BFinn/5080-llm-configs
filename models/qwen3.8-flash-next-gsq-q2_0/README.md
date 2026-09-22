@@ -1,4 +1,4 @@
-# Qwen3.8-Flash-Next (512x56B MoE) on a single RTX 5080 16 GB
+# Qwen3.8-Flash-Next (177B MoE) on a single RTX 5080 16 GB
 
 **A 512-expert mixture-of-experts model with a 131,072-token context, served at
 ~1,100 tok/s prefill and 50-54 tok/s decode on one consumer 16 GB GPU.**
@@ -14,9 +14,26 @@ Status: deployed and serving. All numbers below are measured on the hardware in
 
 ## Why this fits at all
 
-The model's GGUF metadata reports `size_label = 512x56B`: 48 layers, 512 experts per
-layer, **10 active per token**, 2560 embedding width, plus a 16-head PLE (per-layer
-embedding) lookup table. Native context is 262,144.
+**177B parameters, 66.4 GB on disk.** The two shards split along the architecture,
+and are quantized differently:
+
+| Shard | Parameters | On disk | Effective |
+|---|---|---|---|
+| 1 of 2 — MoE backbone | 125.74B | 37.62 GB | 2.39 bpw |
+| 2 of 2 — n-gram / PLE tables | 51.20B | 28.80 GB | 4.50 bpw |
+| **served total** | **176.94B** | **66.42 GB** | **3.00 bpw** |
+
+The model card reads "125B with 6B activated, plus 51B n-gram embedding and 4B MTP", so
+the tables are *additional* to the headline 125B rather than part of it. Worth stating,
+because the two figures get conflated and only one of them is arithmetically possible:
+this file at 125B would be 4.25 bpw, which no Q2_0 build is. The 4B MTP head and the
+vision projector ship as separate files and neither is loaded here.
+
+The GGUF also reports `size_label = 512x56B`: 48 layers, 512 experts per layer,
+**10 active per token**, 2560 embedding width, plus a 16-head n-gram embedding table.
+llama.cpp calls that table the PLE, after its `ple.ngram_size` and `ple.heads_per_ngram`
+metadata keys, and this page uses that name throughout — it is the same thing the tech
+report calls n-gram embeddings. Native context is 262,144.
 
 Only ~2% of expert weights are touched for any given token. So the weights do not need
 to live on the GPU. They live in **pinned host RAM**, and the GPU pulls the ~10 active
@@ -26,7 +43,7 @@ GDN layers, and the KV cache. That is the whole trick:
 | Component | Lives on | Size |
 |---|---|---|
 | Routed experts (Q2_0) | CPU RAM, pinned | 29.0 GiB |
-| PLE lookup table | Page cache, file-backed | ~27 GiB |
+| N-gram / PLE tables | Page cache, file-backed | ~27 GiB |
 | Attention / GDN / KV cache | GPU (16 GB) | 14.8 GiB |
 
 The binding constraint is **PCIe bandwidth**, not VRAM and not the SSD. Measured: a

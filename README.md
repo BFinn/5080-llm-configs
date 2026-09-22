@@ -30,7 +30,7 @@ predicts which optimisations work and which cannot. See
 
 | Model | Quant | Size | Context | Prefill | Decode | Entry |
 |---|---|---|---|---|---|---|
-| Qwen3.8-Flash-Next (512x56B MoE) | GSQ-RCO Q2_0 + LRU expert cache | 66.4 GB | 131,072 | 1,101 tok/s | 50-54 tok/s | [entry](models/qwen3.8-flash-next-gsq-q2_0/) |
+| Qwen3.8-Flash-Next (177B MoE) | GSQ-RCO Q2_0 + LRU expert cache | 66.4 GB | 131,072 | 1,101 tok/s | 50-54 tok/s | [entry](models/qwen3.8-flash-next-gsq-q2_0/) |
 | Qwen3.8-27B (dense, vision) | UD-IQ3_S | 12 GB | 98,304 | 1,756 tok/s | 95-96 tok/s | [entry](models/qwen3.8-27b/) |
 
 Prefill figures are for a 30K-token prompt. Decode for the 27B is with its deployed
