@@ -481,17 +481,27 @@ Validation of the kernel:
 | Check | Result |
 |---|---|
 | Correctness vs scalar, 2,000 random trials | 0 mismatches |
+| Unpack logic, all 256 packed-byte patterns | 0 mismatches |
 | Single-thread throughput | 0.8 to 8.0 GB/s (**9.5x**) |
+| `test-quantize-perf`, plain AVX2, no VNNI | 53.2 to 6.2 cycles/32 vals (**8.5x**) |
+| `test-quantize-perf`, with AVX-512-VNNI | 53.2 to 5.1 cycles/32 vals (**10.4x**) |
 | Model-level decode, 64K, CPU path | 10.4 to 31.7-33.1 tok/s (**3.1x**) |
 | Perplexity, CPU path vs GPU path, 6-chunk subset | 3.3396 vs 3.3397 |
 
-That last row is a path-equality check, not a quality score. Two different kernels
+The perplexity row is a path-equality check, not a quality score. Two different kernels
 producing the same perplexity to four decimals is strong evidence the AVX2 kernel is
 numerically correct at model level.
 
+The two `test-quantize-perf` rows separate what the 9.5x row does not. This machine has
+AVX-512-VNNI, and `mul_sum_i8_pairs_float` uses it when present, so the original figure
+is really AVX2-plus-VNNI against scalar. Measured apart on current master, the plain-AVX2
+path is worth 8.5x on its own and VNNI adds a further 1.2x. That split is the interesting
+one, because most x86 CPUs in use have AVX2 and no VNNI.
+
 Both fixes are deployed together. The env var is the active path; deleting that one line
 from the unit falls back to the AVX2 CPU kernel at roughly the same decode speed and less
-PCIe traffic. The patch is **not upstreamed**.
+PCIe traffic. The patch is **not upstreamed** — see
+[`patches/`](patches/#provenance) for how it relates to the open upstream PR.
 
 ---
 

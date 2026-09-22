@@ -17,7 +17,7 @@ git -C ~/src/llama.cpp-lru-new am "$PWD"/000*.patch
 
 | | Patch | Author | Role |
 |---|---|---|---|
-| `0001` | AVX2 `vec_dot` kernel for Q2_0 x Q8_0 | mine | Mainline bound `ggml_vec_dot_q2_0_q8_0` to the scalar `_generic` on x86. This is the real kernel. 9.5x single-thread over scalar, 0 mismatches in 2000 random trials. |
+| `0001` | AVX2 `vec_dot` kernel for Q2_0 x Q8_0 | mine | Mainline binds `ggml_vec_dot_q2_0_q8_0` to the scalar `_generic` on x86 — still the only type in `arch/x86/quants.c` without an SIMD path. This is the real kernel. 8.5x over scalar on plain AVX2, 10.4x where AVX-512-VNNI is available, 0 mismatches in 2000 random trials. |
 | `0002` | MoE expert cache: GPU-resident LRU cache | **csantiago78** | The cache itself, cherry-picked from [llama.cpp PR #27861](https://github.com/ggml-org/llama.cpp/pull/27861). Adds `--moe-expert-cache`. Not my work — see [NOTICE](../../../NOTICE). |
 | `0003` | Synchronize the backend before publishing cache updates | mine | Correctness fix on top of `0002`. |
 | `0004` | Windowed admission gate and upload telemetry | mine | Performance policy on top of `0002`. Worth 12-14% decode over the PR's default. |
@@ -85,6 +85,13 @@ couple of comments. Use `--moe-expert-cache`.
 `0002` is redistributed with csantiago78's authorship intact, including their own commit
 trailers, because the configuration documented here cannot be reproduced without it. It
 was unmerged at the time of writing, so expect it to need rebasing — or to be replaced
-by whatever lands upstream. `0001` is not upstreamed either.
+by whatever lands upstream.
+
+`0001` is not upstreamed either. There is an open upstream PR,
+[#26348](https://github.com/ggml-org/llama.cpp/pull/26348), adding a Q2_0 x86 dot product
+gated on VNNI; CPUs with AVX2 but no VNNI (Zen 1-3, Intel before Alder Lake) keep falling
+back to scalar under it. `0001` gates on `__AVX2__` instead and picks up VNNI anyway
+through `mul_sum_i8_pairs_float`, so it covers both — but if #26348 lands first, this
+patch should be rebased as the non-VNNI tier of that function rather than kept as is.
 
 [NOTICE](../../../NOTICE) records who wrote what and under which license.
