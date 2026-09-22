@@ -38,8 +38,9 @@ speculative decoding, which is worth +127% at that depth; without it the same mo
 decodes at 42 tok/s. Speculation *loses* on the MoE — see
 [why](models/qwen3.8-27b/#speculative-decoding-wins-here-and-that-is-the-point).
 
-Both Flash-Next rates drop on longer prompts: at 187K it is 728 tok/s prefill and
-16.9 tok/s decode. See
+Both Flash-Next rates drop on longer prompts: near its 131K limit, a 119K prompt
+prefills at 825 tok/s and decodes at 19.7 tok/s. The same machine will serve 262K
+without the expert cache, at ~33 tok/s decode. See
 [throughput vs context length](models/qwen3.8-flash-next-gsq-q2_0/#throughput-vs-context-length).
 
 ## Layout

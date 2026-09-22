@@ -1,7 +1,11 @@
 # Qwen3.8-Flash-Next (512x56B MoE) on a single RTX 5080 16 GB
 
-**A 512-expert mixture-of-experts model with a 262,144-token context, served at
-~1,080 tok/s prefill and ~33 tok/s decode on one consumer 16 GB GPU.**
+**A 512-expert mixture-of-experts model with a 131,072-token context, served at
+~1,100 tok/s prefill and 50-54 tok/s decode on one consumer 16 GB GPU.**
+
+The GPU-resident expert cache that buys that decode rate costs context: the same machine
+will serve 262,144 tokens without it, at ~33 tok/s. Both arms are documented here, and
+[the trade is spelled out](#breaking-the-wall-a-gpu-resident-lru-expert-cache).
 
 Status: deployed and serving. All numbers below are measured on the hardware in
 [`../../README.md`](../../README.md), not estimated, unless a row says otherwise.
@@ -37,15 +41,26 @@ Full unit file: [`flashnext-server.service`](flashnext-server.service).
 Replace `__HOST_IP__`, and put the API key in `~/.config/llama/api-key` at mode 600 —
 `--api-key` on the command line is readable by every local user via `ps`.
 
+This is the deployed arm: expert cache on, 131K context. It needs the **whole** patch
+series in [`patches/`](patches/), not just the AVX2 kernel — `--moe-expert-cache` does
+not exist until `0002` is applied. See [Reproducing](#reproducing).
+
 ```bash
 llama-server \
   -m Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf \
   --no-warmup -lm dio \
   -ngl 99 -ot ffn_.*_exps=CPU \
-  -fa on -ctk q8_0 -ctv q8_0 -c 262144 -b 4096 -ub 2048 -t 12 -tb 12 \
+  --moe-expert-cache 64 --moe-expert-cache-inserts 2 \
+  -fa on -ctk q8_0 -ctv q8_0 -c 131072 -b 4096 -ub 2048 -t 12 -tb 12 \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 \
   --cache-reuse 256 --jinja --parallel 1
-# plus: GGML_OP_OFFLOAD_MIN_BATCH=1
+# plus: LLAMA_MOE_CACHE_ADMIT=3 LLAMA_MOE_CACHE_WINDOW=32
+# and deliberately NOT GGML_OP_OFFLOAD_MIN_BATCH -- see the flag table below
 ```
+
+For the 262K arm instead: drop both `--moe-expert-cache*` flags, set
+`GGML_OP_OFFLOAD_MIN_BATCH=1`, and raise `-c` to 262144. That is what every table from
+here down to [Quality](#quality) was measured on.
 
 Every flag that matters, and why:
 
@@ -53,10 +68,11 @@ Every flag that matters, and why:
 |---|---|
 | `-lm dio` | Pinned host memory via direct IO. Pageable mmap caps PCIe at ~10.7 GB/s; pinned reaches 20.0 GB/s. Worth 1.55x prefill on its own. |
 | `-ot ffn_.*_exps=CPU` with `-ngl 99` | Explicit split: experts on CPU, everything else on GPU. **Do not use `--fit` here.** At 262K, `--fit` makes a larger KV reservation and silently pushes non-expert layers to the CPU, collapsing decode from ~33 to 15.5 tok/s at identical VRAM. |
-| `GGML_OP_OFFLOAD_MIN_BATCH=1` | Default is 32. Below that batch size, ggml keeps the matmul on the CPU. Decode is batch-1, so every token hit the CPU kernel. Setting 1 routes per-token expert matmuls to the GPU. Decode 10.4 to 38.5 tok/s with no recompile. |
+| `--moe-expert-cache 64 --moe-expert-cache-inserts 2` | GPU-resident LRU cache of recently used expert slices, 64 slots per layer, ~4 GiB of VRAM. Decode 34 to 50-54 tok/s, at the cost of dropping context from 262K to 131K. Requires patches `0002`-`0005`. |
+| `GGML_OP_OFFLOAD_MIN_BATCH=1` | **262K arm only.** Default is 32. Below that batch size, ggml keeps the matmul on the CPU. Decode is batch-1, so every token hit the CPU kernel. Setting 1 routes per-token expert matmuls to the GPU. Decode 10.4 to 38.5 tok/s with no recompile. **Leave it at the default when the expert cache is on** — cache misses are computed by the CPU matmul, and combining the two measured at half speed (16.8 tok/s). |
 | `--no-warmup` | Default warmup touches all weights and evicts the page cache that the PLE table depends on. |
 | `-ub 2048 -b 4096` | Prefill cost scales with expert bytes per micro-batch. Larger ubatch amortizes the expert sweep. Worth ~2.6x over `-ub 512`. |
-| `-ctk q8_0 -ctv q8_0` | Quantized KV cache. Required to hold 262K in the remaining VRAM. |
+| `-ctk q8_0 -ctv q8_0` | Quantized KV cache. Required to hold this much context in the VRAM the experts and the cache leave free. |
 | `--parallel 1` | One slot. Concurrency would multiply the KV reservation. |
 
 Note: `--cache-reuse` is accepted but the server disables it for this architecture.
@@ -65,6 +81,12 @@ Ordinary prefix caching still works, which matters a lot for multi-turn use.
 ---
 
 ## Benchmarks
+
+Everything from here to [Quality](#quality) was measured on the **262K arm, before the
+expert cache**: `-c 262144`, `GGML_OP_OFFLOAD_MIN_BATCH=1`, no `--moe-expert-cache`. It
+is kept because it is how the configuration was found and because 262K is still a real
+option. For the deployed 131K numbers, go to
+[breaking the wall](#breaking-the-wall-a-gpu-resident-lru-expert-cache).
 
 ### How the configuration was arrived at
 
@@ -80,7 +102,9 @@ Each row changes one thing from the row above. 30K-token prompt, same hardware.
 Clean attribution for the prefill gain: **1.9x from halving expert bytes** (55.4 to
 29.0 GiB) **x 1.55x from pinning the host buffers** = 2.95x overall.
 
-### Deployed configuration, measured on the live endpoint
+### The 262K arm, measured on the live endpoint
+
+Deployed configuration at the time of measurement; superseded by the expert-cache arm.
 
 | Metric | Value |
 |---|---|
@@ -96,7 +120,9 @@ Clean attribution for the prefill gain: **1.9x from halving expert bytes** (55.4
 ### Throughput vs context length
 
 The decode number above comes from a short prompt. Both rates drop as the prompt grows.
-Measured cold on the live endpoint, thinking off, temperature 0.
+Measured cold on the live endpoint, thinking off, temperature 0. Still the 262K arm — the
+187K row does not exist on the deployed 131K configuration, whose nearest measured point
+is a 119K prompt at 825 tok/s prefill and 19.7 tok/s decode.
 
 | Prompt tokens | Prefill | Time to first token | Decode |
 |---|---|---|---|
@@ -206,12 +232,13 @@ per-token budget and returns 7.9%; 9 layers removes 18.75% and returns 14.1%. Ni
 idles fine and dies with CUDA OOM when a long prefill needs its compute buffers.
 
 The catch: **both levers cost the same ~4 GiB of VRAM, so you can have one, not both.** And
-at the deployed 262K context neither fits at all, because context itself has already spent
-the headroom. Hence the deployed configuration stays as it is.
+at 262K context neither fits at all, because context itself has already spent the
+headroom. That is what made the expert cache, rather than static residency, the thing
+worth building.
 
 | Goal | Context | Config | Prefill | Decode |
 |---|---|---|---|---|
-| Full context (deployed) | 262,144 | ub 2048, q8_0 KV | 1,102 | 34.1 |
+| Full context | 262,144 | ub 2048, q8_0 KV | 1,102 | 34.1 |
 | Max prefill | 131,072 | ub 4096, q8_0 KV | 1,378 | 34.0 |
 | Max decode | 131,072 | ub 2048, 6 layers resident | 1,149 | 36.7 |
 
@@ -441,7 +468,7 @@ AVX2 paths. Decode is batch-1 and was running on the CPU, so every token paid sc
 to the GPU, which does have a Q2_0 kernel. Decode 10.4 to 38.5 tok/s at 64K.
 
 **Fix 2, an actual AVX2 kernel.** See
-[`patches/q2_0-avx2-kernel.patch`](patches/q2_0-avx2-kernel.patch), 48 lines against
+[`patches/0001-*`](patches/), 48 lines against
 llama.cpp master `ec92815`. Unpack 8 packed bytes into 32 int8 codes without per-byte
 shifts: `cvtepu8_epi32`, spread the even and odd bit-pairs with shifts of 12 and 6/18,
 mask `0x03030303`, subtract 1 to map `{0,1,2,3}` to `{-1,0,1,2}`, then
@@ -496,25 +523,41 @@ Things that cost real time to discover.
 
 ## Reproducing
 
+This builds the deployed arm. The unit passes `--moe-expert-cache` and expects its
+binaries in `~/src/llama.cpp-lru-new/build/bin`, so a kernel-only build will not start
+it — apply the whole series, and clone to that path or edit the two path fragments in
+the unit.
+
 ```bash
 # 1. Model (66.4 GB, 2 shards) from ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, Q2_0
-# 2. Build llama.cpp master ec92815 with CUDA, then apply the kernel patch:
-git apply patches/q2_0-avx2-kernel.patch && cmake --build build -j
-# 3. Put the API key where the unit expects it, readable only by you:
+# 2. llama.cpp at master ec92815, with all five patches:
+#      0001 AVX2 Q2_0 kernel        0002 expert cache (llama.cpp PR #27861, csantiago78)
+#      0003 backend sync fix        0004 admission gate        0005 telemetry
+git clone https://github.com/ggml-org/llama.cpp ~/src/llama.cpp-lru-new
+git -C ~/src/llama.cpp-lru-new checkout ec92815
+git -C ~/src/llama.cpp-lru-new am "$PWD"/patches/000*.patch
+# 3. Build with CUDA:
+cmake -S ~/src/llama.cpp-lru-new -B ~/src/llama.cpp-lru-new/build -DGGML_CUDA=ON
+cmake --build ~/src/llama.cpp-lru-new/build -j
+# 4. Put the API key where the unit expects it, readable only by you:
 install -d -m 700 ~/.config/llama && install -m 600 /dev/null ~/.config/llama/api-key
 printf '%s\n' 'YOUR-KEY' > ~/.config/llama/api-key
-# 4. Install the unit, substituting __HOST_IP__:
+# 5. Install the unit, substituting __HOST_IP__:
 cp flashnext-server.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now flashnext-server
 ```
 
+For the 262K arm, apply only `0001` and edit the flags as described under
+[Final configuration](#final-configuration).
+
 ## Known limits and open items
 
 - One request at a time. Concurrent callers queue.
-- No vision. The BF16 projector was dropped to fit 262K context in VRAM. Re-adding it
-  costs roughly 1 GiB and some context.
-- Long prompts cost real latency up front: ~28 s at 30K, ~4 min at 190K. Prefix caching
-  means a multi-turn conversation pays this once.
+- No vision. The BF16 projector was dropped to spend that VRAM on context and the expert
+  cache instead. Re-adding it costs roughly 1 GiB and some context.
+- Long prompts cost real latency up front: ~28 s at 30K, ~2.5 min at 119K on the deployed
+  arm (~4 min at 190K on the 262K arm). Prefix caching means a multi-turn conversation
+  pays this once.
 - Cannot run alongside another large model on this machine.
 - MTP draft head is incompatible with this GSQ build (`output_hc_norm` dimensions), so
   speculative decode is not available to recover decode speed.

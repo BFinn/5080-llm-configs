@@ -28,6 +28,7 @@ it twice changing only what follows `--`; nothing else about the run differs.
 | `--ppl-corpus` | path to `wiki.test.raw` for phase `q` |
 | `--depth-tokens` | size of the long prompt in phase `s` (default 30,000) |
 | `--port` | defaults to 8299, deliberately not the serving port |
+| `--out` | output directory, defaults to `bench-<label>-<timestamp>` |
 
 ### Things it does on purpose
 

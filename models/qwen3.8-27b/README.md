@@ -85,7 +85,8 @@ curl -H "Authorization: Bearer $KEY" http://$HOST:8082/v1/models
 Only one of the two can run at a time.
 
 **Division of labour.** 27B for interactive work, vision, and agent loops. Flash-Next for
-long-context and hard reasoning, where a 4-minute prefill on a 190K prompt is acceptable.
+long-context and hard reasoning, where a 2.5-minute prefill on a 119K prompt is
+acceptable.
 
 That split is now measured rather than asserted: this model decodes about twice as fast
-as Flash-Next on a short prompt and carries a third of the context.
+as Flash-Next on a short prompt and carries three quarters of the context.
